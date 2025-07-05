@@ -4,6 +4,10 @@ class FirebaseTodoApp {
         this.currentUser = null;
         this.unsubscribeTodos = null;
         
+        // Firebase 서비스 가져오기
+        this.auth = window.firebaseAuth;
+        this.database = window.firebaseDatabase;
+        
         this.initializeElements();
         this.addEventListeners();
         this.checkAuthState();
@@ -50,7 +54,7 @@ class FirebaseTodoApp {
     
     // 인증 상태 확인
     checkAuthState() {
-        auth.onAuthStateChanged((user) => {
+        this.auth.onAuthStateChanged(async (user) => {
             if (user) {
                 this.currentUser = user;
                 this.showMainApp();
@@ -58,7 +62,7 @@ class FirebaseTodoApp {
             } else {
                 this.currentUser = null;
                 this.showAuthModal();
-                this.unsubscribeFromTodos();
+                await this.unsubscribeFromTodos();
             }
         });
     }
@@ -72,7 +76,8 @@ class FirebaseTodoApp {
         const password = document.getElementById('loginPassword').value;
         
         try {
-            await auth.signInWithEmailAndPassword(email, password);
+            const { signInWithEmailAndPassword } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js");
+            await signInWithEmailAndPassword(this.auth, email, password);
             this.hideLoading();
             this.clearAuthError();
         } catch (error) {
@@ -90,7 +95,8 @@ class FirebaseTodoApp {
         const password = document.getElementById('signupPassword').value;
         
         try {
-            await auth.createUserWithEmailAndPassword(email, password);
+            const { createUserWithEmailAndPassword } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js");
+            await createUserWithEmailAndPassword(this.auth, email, password);
             this.hideLoading();
             this.clearAuthError();
         } catch (error) {
@@ -102,7 +108,8 @@ class FirebaseTodoApp {
     // 로그아웃 처리
     async handleLogout() {
         try {
-            await auth.signOut();
+            const { signOut } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js");
+            await signOut(this.auth);
             this.showMessage('로그아웃되었습니다.', 'info');
         } catch (error) {
             this.showMessage('로그아웃 중 오류가 발생했습니다.', 'error');
@@ -149,12 +156,15 @@ class FirebaseTodoApp {
         const todo = {
             text: text,
             completed: false,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdAt: Date.now(),
             userId: this.currentUser.uid
         };
         
         try {
-            await db.collection('todos').add(todo);
+            const { ref, push, set } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js");
+            const todosRef = ref(this.database, `todos/${this.currentUser.uid}`);
+            const newTodoRef = push(todosRef);
+            await set(newTodoRef, todo);
             this.todoInput.value = '';
             this.todoInput.focus();
             this.showMessage('할일이 추가되었습니다!', 'success');
@@ -167,15 +177,17 @@ class FirebaseTodoApp {
     // 할일 완료/미완료 토글
     async toggleTodo(id) {
         try {
-            const todoRef = db.collection('todos').doc(id);
-            const todoDoc = await todoRef.get();
+            const { ref, get, update } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js");
+            const todoRef = ref(this.database, `todos/${this.currentUser.uid}/${id}`);
+            const todoSnapshot = await get(todoRef);
             
-            if (todoDoc.exists && todoDoc.data().userId === this.currentUser.uid) {
-                await todoRef.update({
-                    completed: !todoDoc.data().completed
+            if (todoSnapshot.exists() && todoSnapshot.val().userId === this.currentUser.uid) {
+                const currentCompleted = todoSnapshot.val().completed;
+                await update(todoRef, {
+                    completed: !currentCompleted
                 });
                 
-                const message = todoDoc.data().completed ? '완료를 취소했습니다!' : '완료되었습니다!';
+                const message = currentCompleted ? '완료를 취소했습니다!' : '완료되었습니다!';
                 this.showMessage(message, 'info');
             }
         } catch (error) {
@@ -187,11 +199,12 @@ class FirebaseTodoApp {
     // 할일 삭제
     async deleteTodo(id) {
         try {
-            const todoRef = db.collection('todos').doc(id);
-            const todoDoc = await todoRef.get();
+            const { ref, get, remove } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js");
+            const todoRef = ref(this.database, `todos/${this.currentUser.uid}/${id}`);
+            const todoSnapshot = await get(todoRef);
             
-            if (todoDoc.exists && todoDoc.data().userId === this.currentUser.uid) {
-                await todoRef.delete();
+            if (todoSnapshot.exists() && todoSnapshot.val().userId === this.currentUser.uid) {
+                await remove(todoRef);
                 this.showMessage('할일이 삭제되었습니다!', 'success');
             }
         } catch (error) {
@@ -201,7 +214,7 @@ class FirebaseTodoApp {
     }
     
     // 할일 목록 로드
-    loadTodos() {
+    async loadTodos() {
         if (!this.currentUser) return;
         
         this.showLoading();
@@ -209,18 +222,26 @@ class FirebaseTodoApp {
         // 기존 리스너 해제
         this.unsubscribeFromTodos();
         
-        // 실시간 리스너 설정
-        this.unsubscribeTodos = db.collection('todos')
-            .where('userId', '==', this.currentUser.uid)
-            .orderBy('createdAt', 'desc')
-            .onSnapshot((snapshot) => {
+        try {
+            const { ref, onValue, off, query, orderByChild } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js");
+            
+            // 실시간 리스너 설정
+            const todosRef = ref(this.database, `todos/${this.currentUser.uid}`);
+            const todosQuery = query(todosRef, orderByChild('createdAt'));
+            
+            this.unsubscribeTodos = onValue(todosQuery, (snapshot) => {
                 this.todos = [];
-                snapshot.forEach((doc) => {
-                    this.todos.push({
-                        id: doc.id,
-                        ...doc.data()
+                if (snapshot.exists()) {
+                    snapshot.forEach((childSnapshot) => {
+                        this.todos.push({
+                            id: childSnapshot.key,
+                            ...childSnapshot.val()
+                        });
                     });
-                });
+                    
+                    // 생성 시간 역순으로 정렬
+                    this.todos.sort((a, b) => b.createdAt - a.createdAt);
+                }
                 
                 this.renderTodos();
                 this.updateStats();
@@ -230,6 +251,11 @@ class FirebaseTodoApp {
                 this.hideLoading();
                 this.showMessage('데이터 로드 중 오류가 발생했습니다.', 'error');
             });
+        } catch (error) {
+            console.error('Realtime Database 모듈 로드 오류:', error);
+            this.hideLoading();
+            this.showMessage('데이터베이스 연결 중 오류가 발생했습니다.', 'error');
+        }
     }
     
     // 할일 목록 렌더링
@@ -301,9 +327,10 @@ class FirebaseTodoApp {
     }
     
     // 리스너 해제
-    unsubscribeFromTodos() {
+    async unsubscribeFromTodos() {
         if (this.unsubscribeTodos) {
-            this.unsubscribeTodos();
+            const { off } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js");
+            off(this.unsubscribeTodos);
             this.unsubscribeTodos = null;
         }
     }
