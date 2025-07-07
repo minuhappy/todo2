@@ -50,6 +50,11 @@ class FirebaseTodoApp {
                 this.addTodo();
             }
         });
+        // 구글 로그인 버튼 이벤트
+        const googleLoginBtn = document.getElementById('googleLoginBtn');
+        if (googleLoginBtn) {
+            googleLoginBtn.addEventListener('click', () => this.handleGoogleLogin());
+        }
     }
     
     // 인증 상태 확인
@@ -412,6 +417,21 @@ class FirebaseTodoApp {
                 }
             }, 300);
         }, 3000);
+    }
+    
+    // 구글 로그인 처리
+    async handleGoogleLogin() {
+        this.showLoading();
+        try {
+            const { GoogleAuthProvider, signInWithPopup } = await import("https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js");
+            const provider = new GoogleAuthProvider();
+            await signInWithPopup(this.auth, provider);
+            this.hideLoading();
+            this.clearAuthError();
+        } catch (error) {
+            this.hideLoading();
+            this.showAuthError(this.getErrorMessage(error.code) || '구글 로그인 중 오류가 발생했습니다.');
+        }
     }
 }
 

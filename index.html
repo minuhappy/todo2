@@ -29,7 +29,11 @@
 
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
+        // Analytics는 배포 환경(https)에서만 초기화
+        let analytics = null;
+        if (location.hostname !== "localhost" && location.protocol === "https:") {
+            analytics = getAnalytics(app);
+        }
         const auth = getAuth(app);
         const database = getDatabase(app);
 
@@ -59,6 +63,13 @@
                     <input type="password" id="signupPassword" placeholder="비밀번호 (6자 이상)" required>
                     <button type="submit" class="auth-btn">회원가입</button>
                 </form>
+                
+                <div class="social-login">
+                    <button id="googleLoginBtn" class="google-btn" type="button">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google Logo" style="width:20px; vertical-align:middle; margin-right:8px;">
+                        구글로 로그인
+                    </button>
+                </div>
                 
                 <div class="auth-switch">
                     <span id="switchText">계정이 없으신가요? </span>
